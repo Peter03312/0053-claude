@@ -1,0 +1,44 @@
+services:
+  api:
+    build: ./api
+    environment:
+      DB_PATH: /data/app.db
+    volumes:
+      - api-data:/data
+    ports:
+      - "${API_PORT:-5001}:5000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health', timeout=3)"
+      interval: 5s
+      timeout: 4s
+      retries: 12
+      start_period: 5s
+
+  web:
+    build: ./web
+    ports:
+      - "${APP_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  verify:
+    build:
+      context: .
+      dockerfile: verify/Dockerfile
+    environment:
+      API_URL: http://api:5000
+      WEB_URL: http://web:80
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: "no"
+
+volumes:
+  api-data:

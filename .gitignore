@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+*.local
+
+# 数据与运行时
+data/
+*.db
+*.sqlite3
+
+# 系统与编辑器
+.DS_Store
+.idea/
+.vscode/
