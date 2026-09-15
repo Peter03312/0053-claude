@@ -276,6 +276,50 @@ def test_bubble_must_stay_inside_safe_area():
     assert "B" in r["emptyDomains"]
 
 
+# ---------------------------------------------------------------- 冲突边精确性
+def test_conflict_detection_does_not_blame_arrangeable_pair():
+    """回归：域很大时也不得误标冲突边。
+
+    A 锁定且横贯安全区 → A→B 只能让 B 下移 31 格（超出旧截断窗口）；
+    真正无解的是 B→C（C 锁在左上角，B 无法建立前向边）。
+    只有 (B,C) 应被标记，(A,B) 本来可以排列，不得误伤。
+    """
+    safe = {"x": 0, "y": 0, "w": 400, "h": 400}
+    s = spec(
+        [
+            bubble("A", 0, 20, w=400, h=10, tail=(200, 30), anchor=(200, 60), locked=True),
+            bubble("B", 0, 0, tail=(5, 0), anchor=(5, 100)),
+            bubble("C", 0, 0, tail=(5, 0), anchor=(5, -30), locked=True),
+        ],
+        ["A", "B", "C"],
+        max_step=100,
+        safe=safe,
+    )
+    r = solve(s)
+    assert r["status"] == "no_solution"
+    assert r["conflicts"] == [{"pair": ["B", "C"]}]
+
+
+def test_conflict_witness_may_require_large_steps():
+    """相邻对的可行见证可能需要接近上限的大位移，精确检测必须找得到。"""
+    safe = {"x": 0, "y": 0, "w": 400, "h": 400}
+    # A 锁定横贯，B 在 A 上方：A→B 只能让 B 下移 31 格；C 不挡路（远离）。
+    s = spec(
+        [
+            bubble("A", 0, 20, w=400, h=10, tail=(200, 30), anchor=(200, 60), locked=True),
+            bubble("B", 0, 0, tail=(5, 0), anchor=(5, 100)),
+            bubble("C", 300, 200, tail=(305, 200), anchor=(305, 170), locked=True),
+        ],
+        ["A", "B", "C"],
+        max_step=100,
+        safe=safe,
+    )
+    r = solve(s)
+    assert r["status"] == "ok"
+    assert r["positions"]["B"] == {"x": 0, "y": 31}
+    assert r["positions"]["A"] == {"x": 0, "y": 20}
+
+
 # ---------------------------------------------------------------- 校验
 def test_validation_rejects_duplicate_and_empty_ids():
     dup = spec([bubble("A", 0, 0), bubble("A", 30, 0)], ["A", "A"])

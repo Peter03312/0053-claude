@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { Spec } from '../types'
+import type { BubbleSpec, Spec } from '../types'
 
 const props = defineProps<{ spec: Spec; selectedId: string | null }>()
 const emit = defineEmits<{
@@ -8,6 +8,7 @@ const emit = defineEmits<{
   (e: 'add'): void
   (e: 'remove', id: string): void
   (e: 'rename', oldId: string, newId: string): void
+  (e: 'update-rect', id: string, rect: { x: number; y: number; w: number; h: number }): void
 }>()
 
 const selected = computed(() => props.spec.bubbles.find((b) => b.id === props.selectedId) ?? null)
@@ -15,6 +16,16 @@ const selected = computed(() => props.spec.bubbles.find((b) => b.id === props.se
 function onRename(evt: Event, oldId: string) {
   const v = (evt.target as HTMLInputElement).value
   emit('rename', oldId, v)
+}
+
+function onRect(b: BubbleSpec, field: 'x' | 'y' | 'w' | 'h', evt: Event) {
+  const input = evt.target as HTMLInputElement
+  const v = Number(input.value)
+  if (!Number.isInteger(v) || ((field === 'w' || field === 'h') && v <= 0)) {
+    input.value = String(b[field]) // 非法输入：回退显示当前值
+    return
+  }
+  emit('update-rect', b.id, { x: b.x, y: b.y, w: b.w, h: b.h, [field]: v })
 }
 </script>
 
@@ -39,10 +50,10 @@ function onRename(evt: Event, oldId: string) {
         <input :value="selected.id" @change="onRename($event, selected.id)" />
       </label>
       <div class="grid">
-        <label>X<input type="number" v-model.number="selected.x" /></label>
-        <label>Y<input type="number" v-model.number="selected.y" /></label>
-        <label>宽<input type="number" v-model.number="selected.w" min="1" /></label>
-        <label>高<input type="number" v-model.number="selected.h" min="1" /></label>
+        <label>X<input type="number" :value="selected.x" @change="onRect(selected, 'x', $event)" /></label>
+        <label>Y<input type="number" :value="selected.y" @change="onRect(selected, 'y', $event)" /></label>
+        <label>宽<input type="number" :value="selected.w" min="1" @change="onRect(selected, 'w', $event)" /></label>
+        <label>高<input type="number" :value="selected.h" min="1" @change="onRect(selected, 'h', $event)" /></label>
         <label>尾线 X<input type="number" v-model.number="selected.tail.x" /></label>
         <label>尾线 Y<input type="number" v-model.number="selected.tail.y" /></label>
         <label>落点 X<input type="number" v-model.number="selected.anchor.x" /></label>

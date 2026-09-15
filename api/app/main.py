@@ -7,7 +7,7 @@ from flask import Flask, g, jsonify, request
 
 from . import db as dbmod
 from .solver import SearchBudgetExceeded, solve
-from .validation import ValidationError
+from .validation import ValidationError, validate_spec
 
 
 def create_app(db_path=None):
@@ -73,6 +73,10 @@ def create_app(db_path=None):
             return err("validation", "name 必须是非空字符串", 400)
         if not isinstance(spec, dict):
             return err("validation", "spec 必须是 JSON 对象", 400)
+        try:
+            validate_spec(spec)
+        except ValidationError as e:
+            return err("validation", "分镜规格不合法，无法保存", 400, e.details)
         pid, version = dbmod.create_project(get_db(), name.strip(), json.dumps(spec))
         return jsonify({"id": pid, "version": version}), 201
 
@@ -103,6 +107,12 @@ def create_app(db_path=None):
         name = payload.get("name")
         if name is not None and (not isinstance(name, str) or not name.strip()):
             return err("validation", "name 若提供则必须是非空字符串", 400)
+        if dbmod.get_project(get_db(), pid) is None:
+            return err("not_found", f"项目 {pid} 不存在", 404)
+        try:
+            validate_spec(payload["spec"])
+        except ValidationError as e:
+            return err("validation", "分镜规格不合法，无法保存为新版本", 400, e.details)
         version = dbmod.add_version(
             get_db(), pid, json.dumps(payload["spec"]), name.strip() if isinstance(name, str) else None
         )

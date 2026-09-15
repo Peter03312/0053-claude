@@ -16,7 +16,8 @@ from .geometry import derived_edge, inside_safe, segment_hits_rect, separated
 from .validation import validate_spec
 
 NODE_BUDGET = 400_000
-CONFLICT_PAIR_BUDGET = 2_000_000
+CONFLICT_PAIR_BUDGET = 3_000_000
+INF = 10**9
 
 
 class SearchBudgetExceeded(Exception):
@@ -177,28 +178,112 @@ def _solve_checked(spec):
     }
 
 
+class _DomainIndex:
+    """可行位置集合的二维前缀和索引：O(1) 回答“某矩形内是否存在可行位置”。"""
+
+    __slots__ = ("x0", "y0", "x1", "y1", "ps")
+
+    def __init__(self, positions):
+        xs = [p[0] for p in positions]
+        ys = [p[1] for p in positions]
+        self.x0, self.x1 = min(xs), max(xs)
+        self.y0, self.y1 = min(ys), max(ys)
+        w = self.x1 - self.x0 + 1
+        h = self.y1 - self.y0 + 1
+        ps = [[0] * (w + 1) for _ in range(h + 1)]
+        for x, y in positions:
+            ps[y - self.y0 + 1][x - self.x0 + 1] += 1
+        for j in range(1, h + 1):
+            for i in range(1, w + 1):
+                ps[j][i] += ps[j - 1][i] + ps[j][i - 1] - ps[j - 1][i - 1]
+        self.ps = ps
+
+    def count(self, rx0, ry0, rx1, ry1):
+        """闭矩形内的可行位置数（自动裁剪到索引包围盒）。"""
+        x0 = max(rx0, self.x0)
+        y0 = max(ry0, self.y0)
+        x1 = min(rx1, self.x1)
+        y1 = min(ry1, self.y1)
+        if x0 > x1 or y0 > y1:
+            return 0
+        i0 = x0 - self.x0
+        j0 = y0 - self.y0
+        i1 = x1 - self.x0 + 1
+        j1 = y1 - self.y0 + 1
+        ps = self.ps
+        return ps[j1][i1] - ps[j0][i1] - ps[j1][i0] + ps[j0][i0]
+
+
+def _pair_witness(a, b, da, db, gap, budget):
+    """在 da×db 中精确寻找满足 (互不接触 ∧ 前向阅读边 ∧ 尾线合法) 的见证位置对。
+
+    返回 (pa, pb)；确定不存在返回 None；尾线检查预算耗尽返回 "unknown"
+    （保守不标记，避免误标其实可以排列的台词对）。
+
+    前向边存在时反向边在几何上不可能同时成立（gap ≥ 0、泡高为正），
+    因此相邻台词对的可行性等价于“分离 ∧ 存在前向边 ∧ 尾线”。
+    """
+    if not da or not db:
+        return None
+    idx = _DomainIndex(db)
+    ha, hb = a.h, b.h
+    t = (min(ha, hb) + 1) // 2  # 2*overlap >= min(h) <=> overlap >= t
+    for pa in da:
+        ra = a.rect_at(pa)
+        edge_rects = [
+            (-INF, ra["y"] + ha + gap, INF, INF),  # A 在上：B 顶边不低于 A 底边+间距
+            (ra["x"] + a.w + gap, ra["y"] + t - hb, INF, ra["y"] + ha - t),  # A 在左
+        ]
+        seps = [
+            (ra["x"] + a.w + 1, -INF, INF, INF),
+            (-INF, -INF, ra["x"] - b.w - 1, INF),
+            (-INF, ra["y"] + ha + 1, INF, INF),
+            (-INF, -INF, INF, ra["y"] - b.h - 1),
+        ]
+        active = []
+        for ex0, ey0, ex1, ey1 in edge_rects:
+            for sx0, sy0, sx1, sy1 in seps:
+                r = (max(ex0, sx0), max(ey0, sy0), min(ex1, sx1), min(ey1, sy1))
+                if r[0] <= r[2] and r[1] <= r[3] and idx.count(*r) > 0:
+                    active.append(r)
+        if not active:
+            continue
+        for pb in db:
+            budget[0] -= 1
+            if budget[0] <= 0:
+                return "unknown"
+            x, y = pb
+            inside = False
+            for rx0, ry0, rx1, ry1 in active:
+                if rx0 <= x <= rx1 and ry0 <= y <= ry1:
+                    inside = True
+                    break
+            if not inside:
+                continue
+            rb = b.rect_at(pb)
+            if segment_hits_rect(a.tail_at(pa), a.anchor, rb):
+                continue
+            if segment_hits_rect(b.tail_at(pb), b.anchor, ra):
+                continue
+            return (pa, pb)
+    return None
+
+
 def _no_solution(spec, bubbles, domains, empty):
-    """无解时给出可定位的反馈：相邻台词对中不存在任何相容位置对的“冲突边”。"""
+    """无解时给出可定位的反馈：相邻台词对中不存在任何相容位置对的“冲突边”。
+
+    冲突边判定是精确的（不做域截断）：只有当真不存在任何满足
+    分离/顺序/尾线的位置对时才标记，避免误伤本来可以排列的台词。
+    """
     gap = spec["gap"]
     by_id = {b.id: b for b in bubbles}
     conflicts = []
     order = spec["order"]
+    budget = [CONFLICT_PAIR_BUDGET]
     for a_id, b_id in zip(order, order[1:]):
         a, b = by_id[a_id], by_id[b_id]
-        da, db = domains[a_id], domains[b_id]
-        # 域过大时按代价升序截断，保证检查有界且确定性
-        if len(da) * max(1, len(db)) > CONFLICT_PAIR_BUDGET:
-            keep = max(1, int(CONFLICT_PAIR_BUDGET**0.5))
-            da, db = da[:keep], db[:keep]
-        found = False
-        for pa in da:
-            for pb in db:
-                if _pair_ok(a, pa, b, pb, gap):
-                    found = True
-                    break
-            if found:
-                break
-        if not found:
+        witness = _pair_witness(a, b, domains[a_id], domains[b_id], gap, budget)
+        if witness is None:
             conflicts.append({"pair": [a_id, b_id]})
     parts = []
     if empty:
@@ -207,7 +292,7 @@ def _no_solution(spec, bubbles, domains, empty):
         pairs = "、".join(f"{c['pair'][0]}→{c['pair'][1]}" for c in conflicts)
         parts.append("以下相邻台词无法建立所需阅读顺序: " + pairs)
     if not parts:
-        parts.append("约束组合过强，未能在搜索预算内找到候选布局")
+        parts.append("约束组合过强，未找到候选布局（可能涉及多泡联合约束或尾线走位）")
     return {
         "status": "no_solution",
         "message": "；".join(parts),

@@ -111,6 +111,15 @@ def main():
         fail("历史版本内容不正确")
     ok("项目创建 → 新版本 → 历史版本读取")
 
+    bad_save = make_spec()
+    bad_save["bubbles"][1]["id"] = "A"
+    bad_save["order"] = ["A", "A"]
+    req("PUT", f"{API}/api/projects/{pid}", {"spec": bad_save}, expect=400)
+    r = req("GET", f"{API}/api/projects/{pid}")
+    if r.get("version") != 2:
+        fail(f"非法保存污染了版本号：{r}")
+    ok("非法分镜被拒绝保存且版本号未受污染")
+
     for _ in range(30):
         try:
             with urllib.request.urlopen(f"{WEB}/", timeout=3) as resp:

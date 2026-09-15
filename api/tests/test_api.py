@@ -118,3 +118,21 @@ def test_project_not_found(client):
 def test_project_validation(client):
     assert client.post("/api/projects", json={"name": "", "spec": {}}).status_code == 400
     assert client.post("/api/projects", json={"name": "x"}).status_code == 400
+
+
+def test_save_rejects_invalid_spec(client):
+    """编号重复等非法分镜不得保存成项目或新版本，且版本号不被污染。"""
+    bad = valid_spec()
+    bad["bubbles"][1]["id"] = "A"
+    bad["order"] = ["A", "A"]
+    r = client.post("/api/projects", json={"name": "坏分镜", "spec": bad})
+    assert r.status_code == 400
+    assert any("重复" in d for d in r.get_json()["error"]["details"])
+
+    ok = client.post("/api/projects", json={"name": "好分镜", "spec": valid_spec()})
+    pid = ok.get_json()["id"]
+    r = client.put(f"/api/projects/{pid}", json={"spec": bad})
+    assert r.status_code == 400
+    assert any("重复" in d for d in r.get_json()["error"]["details"])
+    # 版本号未被污染
+    assert client.get(f"/api/projects/{pid}").get_json()["version"] == 1

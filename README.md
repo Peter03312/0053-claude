@@ -50,6 +50,9 @@ docker compose up --build --abort-on-container-exit --exit-code-from verify veri
 
 无解时返回**冲突边**（台词总序中找不到任何相容位置的相邻泡对）与无可行位置的
 气泡列表，前端以红色虚线标出；修改任何几何或顺序后，旧候选叠加立即清除。
+冲突边判定是精确的几何判定（分离 ∧ 前向边 ∧ 尾线，不做截断近似），
+只有真不存在任何相容位置对的台词对才会被标记，不会误伤可排列的对白。
+保存项目/新版本前会执行与求解一致的规格校验，非法分镜（如编号重复）无法落库。
 
 ## 本地开发
 
@@ -69,6 +72,7 @@ npm run dev                   # http://localhost:5173，/api 代理到 5000
 
 ```bash
 cd api && python -m pytest tests -q     # 求解器场景 + API 测试
+cd web && npm test                      # vitest：矩形编辑（尾线平移/吸附）
 cd web && npm run build                 # vue-tsc 类型检查 + 产物构建
 ```
 

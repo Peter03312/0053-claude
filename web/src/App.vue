@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ApiError, api } from './api'
+import { setBubbleRect } from './bubbleOps'
 import CanvasView from './components/CanvasView.vue'
 import BubblePanel from './components/BubblePanel.vue'
 import GlobalPanel from './components/GlobalPanel.vue'
@@ -163,12 +164,13 @@ function renameBubble(oldId: string, newId: string) {
 function moveBubble(id: string, x: number, y: number) {
   const b = spec.bubbles.find((v) => v.id === id)
   if (!b) return
-  const dx = x - b.x
-  const dy = y - b.y
-  b.x = x
-  b.y = y
-  b.tail.x += dx
-  b.tail.y += dy
+  setBubbleRect(b, x, y, b.w, b.h)
+}
+
+function updateBubbleRect(id: string, r: { x: number; y: number; w: number; h: number }) {
+  const b = spec.bubbles.find((v) => v.id === id)
+  if (!b) return
+  setBubbleRect(b, r.x, r.y, r.w, r.h)
 }
 
 function moveAnchor(id: string, x: number, y: number) {
@@ -291,8 +293,20 @@ onMounted(refreshProjects)
       <h1>条漫对白校样台</h1>
       <div class="project-bar">
         <input v-model="projectName" placeholder="分镜名称" class="name" />
-        <button @click="save">保存（{{ projectId == null ? '新建项目' : '新版本' }}）</button>
-        <button @click="saveAsNew">另存为新项目</button>
+        <button
+          :disabled="clientErrors.length > 0"
+          :title="clientErrors.length ? '请先修正下方列出的规格错误' : ''"
+          @click="save"
+        >
+          保存（{{ projectId == null ? '新建项目' : '新版本' }}）
+        </button>
+        <button
+          :disabled="clientErrors.length > 0"
+          :title="clientErrors.length ? '请先修正下方列出的规格错误' : ''"
+          @click="saveAsNew"
+        >
+          另存为新项目
+        </button>
         <select v-model="pickProject">
           <option value="" disabled>选择项目</option>
           <option v-for="p in projects" :key="p.id" :value="String(p.id)">
@@ -321,6 +335,7 @@ onMounted(refreshProjects)
           @add="addBubble"
           @remove="removeBubble"
           @rename="renameBubble"
+          @update-rect="updateBubbleRect"
         />
         <OrderPanel
           :spec="spec"
